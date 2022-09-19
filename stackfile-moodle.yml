@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+
+  traefik:
+    image: "traefik:v2.4"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "80:8181"
+      - "8080:8080"
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.api.service=api@internal"
+      placement:
+        constraints: 
+          - node.role == manager
+    command: 
+      - --log.level=DEBUG
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:8181
+      - --api.dashboard=true 
+      - --api.debug=true
+      - --providers.docker=true
+      - --providers.docker.swarmMode=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=traefik-proxy
+    networks:
+      - traefik-proxy
+
+  mariadb:
+    image: bitnami/mariadb:latest
+    environment:
+     - BITNAMI_DEBUG=true 
+     - MARIADB_EXTRA_FLAGS= --max_allowed_packet=256M
+     - MARIADB_USER=bn_moodle
+     - MARIADB_DATABASE=bitnami_moodle
+     - MARIADB_PASSWORD=bitnami
+     - ALLOW_EMPTY_PASSWORD=yes
+     - NAMI_LOG_LEVEL=trace8
+    volumes:
+      - "mariadb_data_vol:/bitnami/mariadb"
+    deploy:
+      mode: replicated
+      replicas:  1
+      placement:
+        constraints: 
+          - node.role == worker
+          - node.labels.worker==mariadb
+    networks:
+     - database
+
+  moodle:
+    image: tegarshndrn/moodle:port-8181
+    environment:
+     - PHP_UPLOAD_MAX_FILESIZE=2048M
+     - PHP_POST_MAX_SIZE=1024M
+     #- MOODLE_SKIP_BOOTSTRAP=yes
+     #- MOODLE_SKIP_INSTALL=yes
+     - BITNAMI_DEBUG=true
+     - MOODLE_DATABASE_HOST=mariadb
+     - MOODLE_DATABASE_PORT_NUMBER=3306
+     - MOODLE_DATABASE_USER=bn_moodle
+     - MOODLE_DATABASE_NAME=bitnami_moodle
+     - MOODLE_DATABASE_PASSWORD=bitnami
+     - ALLOW_EMPTY_PASSWORD=yes
+     - MOODLE_USERNAME=tegarshndrn16
+     - MOODLE_PASSWORD=Admintegarshndrn16
+     - MOODLE_EMAIL=tegarshndrn16@gmail.com
+     - MOODLE_SITE_NAME='Moodle Cluster Docker Swarm'
+    volumes:
+     - moodle_data_vol:/bitnami/moodle
+     - moodledata_data_vol:/bitnami/moodledata
+    depends_on:
+     - mariadb
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.moodle.rule=Host(`192.168.56.10`)"
+        - "traefik.http.routers.moodle.entrypoints=web"
+        - "traefik.http.services.moodle.loadbalancer.server.port=8181"
+      mode: replicated
+      replicas:  1
+      placement:
+        max_replicas_per_node: 5
+        constraints: 
+          - node.role == worker
+          - node.labels.worker==moodle
+    networks:
+     - database
+     - traefik-proxy
+    
+networks:
+  database:
+    driver: overlay
+    external: true
+  traefik-proxy:
+    driver: overlay
+    external: true
+
+volumes:
+  mariadb_data_vol:
+  moodle_data_vol:
+    driver: nfs
+    driver_opts:
+      share: 192.168.56.14:/var/volume_data/moodle_data
+  moodledata_data_vol:
+    driver: nfs
+    driver_opts:
+      share: 192.168.56.14:/var/volume_data/moodledata_data
+      
+      
